@@ -13,6 +13,7 @@ set(SOURCE_FILES
 	renderers/software.c
 	sio.c
 	timer.c
+	twitter.c
 	video.c)
 
 set(SIO_FILES

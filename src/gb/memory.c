@@ -14,16 +14,13 @@
 
 #include <mgba-util/memory.h>
 
+#include <mgba/internal/gb/twitter.h>
+
 mLOG_DEFINE_CATEGORY(GB_MEM, "GB Memory", "gb.memory");
 
 static const uint8_t _yankBuffer[] = { 0xFF };
 
-enum GBBus {
-	GB_BUS_CPU,
-	GB_BUS_MAIN,
-	GB_BUS_VRAM,
-	GB_BUS_RAM
-};
+enum GBBus { GB_BUS_CPU, GB_BUS_MAIN, GB_BUS_VRAM, GB_BUS_RAM };
 
 static const enum GBBus _oamBlockDMG[] = {
 	GB_BUS_MAIN, // 0x0000
@@ -150,6 +147,8 @@ void GBMemoryInit(struct GB* gb) {
 	gb->memory.cam = NULL;
 
 	GBIOInit(gb);
+
+	fake_ram_init();
 }
 
 void GBMemoryDeinit(struct GB* gb) {
@@ -193,7 +192,6 @@ void GBMemoryReset(struct GB* gb) {
 	gb->memory.hdmaSource = 0;
 	gb->memory.hdmaDest = 0;
 	gb->memory.isHdma = false;
-
 
 	gb->memory.dmaEvent.context = gb;
 	gb->memory.dmaEvent.name = "GB DMA";
@@ -243,6 +241,8 @@ void GBMemorySwitchWramBank(struct GBMemory* memory, int bank) {
 }
 
 uint8_t GBLoad8(struct LR35902Core* cpu, uint16_t address) {
+	// printf("Attempting to read from %4X\n", address);
+
 	struct GB* gb = (struct GB*) cpu->master;
 	struct GBMemory* memory = &gb->memory;
 	if (gb->memory.dmaRemaining) {
@@ -325,6 +325,10 @@ uint8_t GBLoad8(struct LR35902Core* cpu, uint16_t address) {
 }
 
 void GBStore8(struct LR35902Core* cpu, uint16_t address, int8_t value) {
+	printf("Attempting to store value %2X to %4X\n", value, address);
+
+	write_fake_ram(address, value);
+
 	struct GB* gb = (struct GB*) cpu->master;
 	struct GBMemory* memory = &gb->memory;
 	if (gb->memory.dmaRemaining) {
@@ -353,7 +357,9 @@ void GBStore8(struct LR35902Core* cpu, uint16_t address, int8_t value) {
 	case GB_REGION_VRAM:
 	case GB_REGION_VRAM + 1:
 		if (gb->video.mode != 3) {
-			gb->video.renderer->writeVRAM(gb->video.renderer, (address & (GB_SIZE_VRAM_BANK0 - 1)) | (GB_SIZE_VRAM_BANK0 * gb->video.vramCurrentBank));
+			gb->video.renderer->writeVRAM(gb->video.renderer,
+			                              (address & (GB_SIZE_VRAM_BANK0 - 1)) |
+			                                  (GB_SIZE_VRAM_BANK0 * gb->video.vramCurrentBank));
 			gb->video.vramBank[address & (GB_SIZE_VRAM_BANK0 - 1)] = value;
 		}
 		return;
@@ -450,7 +456,7 @@ uint8_t GBView8(struct LR35902Core* cpu, uint16_t address, int segment) {
 		if (segment < 0) {
 			return gb->video.vramBank[address & (GB_SIZE_VRAM_BANK0 - 1)];
 		} else if (segment < 2) {
-			return gb->video.vram[(address & (GB_SIZE_VRAM_BANK0 - 1)) + segment *GB_SIZE_VRAM_BANK0];
+			return gb->video.vram[(address & (GB_SIZE_VRAM_BANK0 - 1)) + segment * GB_SIZE_VRAM_BANK0];
 		} else {
 			return 0xFF;
 		}
@@ -462,7 +468,7 @@ uint8_t GBView8(struct LR35902Core* cpu, uint16_t address, int segment) {
 			if (segment < 0 && memory->sram) {
 				return memory->sramBank[address & (GB_SIZE_EXTERNAL_RAM - 1)];
 			} else if ((size_t) segment * GB_SIZE_EXTERNAL_RAM < gb->sramSize) {
-				return memory->sram[(address & (GB_SIZE_EXTERNAL_RAM - 1)) + segment *GB_SIZE_EXTERNAL_RAM];
+				return memory->sram[(address & (GB_SIZE_EXTERNAL_RAM - 1)) + segment * GB_SIZE_EXTERNAL_RAM];
 			} else {
 				return 0xFF;
 			}
@@ -479,7 +485,7 @@ uint8_t GBView8(struct LR35902Core* cpu, uint16_t address, int segment) {
 		if (segment < 0) {
 			return memory->wramBank[address & (GB_SIZE_WORKING_RAM_BANK0 - 1)];
 		} else if (segment < 8) {
-			return memory->wram[(address & (GB_SIZE_WORKING_RAM_BANK0 - 1)) + segment *GB_SIZE_WORKING_RAM_BANK0];
+			return memory->wram[(address & (GB_SIZE_WORKING_RAM_BANK0 - 1)) + segment * GB_SIZE_WORKING_RAM_BANK0];
 		} else {
 			return 0xFF;
 		}
@@ -616,7 +622,7 @@ void GBPatch8(struct LR35902Core* cpu, uint16_t address, int8_t value, int8_t* o
 	case GB_REGION_CART_BANK0 + 3:
 		_pristineCow(gb);
 		oldValue = memory->romBase[address & (GB_SIZE_CART_BANK0 - 1)];
-		memory->romBase[address & (GB_SIZE_CART_BANK0 - 1)] =  value;
+		memory->romBase[address & (GB_SIZE_CART_BANK0 - 1)] = value;
 		break;
 	case GB_REGION_CART_BANK1:
 	case GB_REGION_CART_BANK1 + 1:
@@ -638,11 +644,14 @@ void GBPatch8(struct LR35902Core* cpu, uint16_t address, int8_t value, int8_t* o
 		if (segment < 0) {
 			oldValue = gb->video.vramBank[address & (GB_SIZE_VRAM_BANK0 - 1)];
 			gb->video.vramBank[address & (GB_SIZE_VRAM_BANK0 - 1)] = value;
-			gb->video.renderer->writeVRAM(gb->video.renderer, (address & (GB_SIZE_VRAM_BANK0 - 1)) + GB_SIZE_VRAM_BANK0 * gb->video.vramCurrentBank);
+			gb->video.renderer->writeVRAM(gb->video.renderer,
+			                              (address & (GB_SIZE_VRAM_BANK0 - 1)) +
+			                                  GB_SIZE_VRAM_BANK0 * gb->video.vramCurrentBank);
 		} else if (segment < 2) {
 			oldValue = gb->video.vram[(address & (GB_SIZE_VRAM_BANK0 - 1)) + segment * GB_SIZE_VRAM_BANK0];
 			gb->video.vramBank[(address & (GB_SIZE_VRAM_BANK0 - 1)) + segment * GB_SIZE_VRAM_BANK0] = value;
-			gb->video.renderer->writeVRAM(gb->video.renderer, (address & (GB_SIZE_VRAM_BANK0 - 1)) + segment * GB_SIZE_VRAM_BANK0);
+			gb->video.renderer->writeVRAM(gb->video.renderer,
+			                              (address & (GB_SIZE_VRAM_BANK0 - 1)) + segment * GB_SIZE_VRAM_BANK0);
 		} else {
 			return;
 		}
