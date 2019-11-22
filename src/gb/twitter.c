@@ -23,7 +23,8 @@ void fake_ram_init() {
 }
 
 uint8_t read_fake_ram(uint16_t address) {
-	send(s, CMD_READ, 1, 0);
+	int command = CMD_READ;
+	send(s, &command, 1, 0);
 	send(s, &address, sizeof(address), 0);
 
 	uint8_t value;
@@ -34,7 +35,8 @@ uint8_t read_fake_ram(uint16_t address) {
 }
 
 void write_fake_ram(uint16_t address, uint8_t value) {
-	send(s, CMD_WRITE, 1, 0);
+	int command = CMD_WRITE;
+	send(s, &command, 1, 0);
 	send(s, &address, sizeof(address), 0);
 	send(s, &value, sizeof(value), 0);
 }

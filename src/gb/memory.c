@@ -241,7 +241,11 @@ void GBMemorySwitchWramBank(struct GBMemory* memory, int bank) {
 }
 
 uint8_t GBLoad8(struct LR35902Core* cpu, uint16_t address) {
-	// printf("Attempting to read from %4X\n", address);
+	if (address >= 0xA000 && address <= 0xBFFF) {
+		printf("Attempting to read from %4X\n", address);
+
+		return read_fake_ram(address);
+	}
 
 	struct GB* gb = (struct GB*) cpu->master;
 	struct GBMemory* memory = &gb->memory;
@@ -285,6 +289,7 @@ uint8_t GBLoad8(struct LR35902Core* cpu, uint16_t address) {
 		return 0xFF;
 	case GB_REGION_EXTERNAL_RAM:
 	case GB_REGION_EXTERNAL_RAM + 1:
+		return read_fake_ram(address);
 		if (memory->rtcAccess) {
 			return memory->rtcRegs[memory->activeRtcReg];
 		} else if (memory->mbcRead) {
@@ -325,9 +330,10 @@ uint8_t GBLoad8(struct LR35902Core* cpu, uint16_t address) {
 }
 
 void GBStore8(struct LR35902Core* cpu, uint16_t address, int8_t value) {
-	printf("Attempting to store value %2X to %4X\n", value, address);
-
-	write_fake_ram(address, value);
+	if (address >= 0xA000 && address <= 0xBFFF) {
+		write_fake_ram(address, value);
+		return;
+	}
 
 	struct GB* gb = (struct GB*) cpu->master;
 	struct GBMemory* memory = &gb->memory;
